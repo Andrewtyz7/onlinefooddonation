@@ -88,15 +88,9 @@ app.post('/api/save-donation', async (req, res) => {
   }
 });
 
-// 404 Handler
-app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
-});
-
-// Error Handler
 app.use((err, req, res, next) => {
-  console.error('Server Error:', err.stack);
-  res.status(500).json({ error: 'Internal server error' });
+  console.error(err); // Always log errors
+  res.status(500).json({ error: 'Something went wrong' });
 });
 
 const PORT = process.env.PORT || 3001;
