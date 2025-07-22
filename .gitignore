@@ -1,0 +1,19 @@
+# Environment variables
+.env
+
+# Dependency directories
+node_modules/
+
+# Logs
+*.log
+logs/
+
+# macOS system files
+.DS_Store
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# Testing coverage
+coverage/
