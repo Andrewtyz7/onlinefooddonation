@@ -59,5 +59,34 @@ app.post('/api/create-payment-intent', async (req, res) => {
   }
 });
 
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
+// Save donation record
+app.post('/api/save-donation', async (req, res) => {
+  try {
+    const { amount, donor_name, donor_email, payment_intent_id } = req.body;
+    
+    const { data, error } = await supabase
+      .from('donations')
+      .insert([{
+        amount,
+        donor_name,
+        donor_email,
+        payment_intent_id,
+        status: 'completed'
+      }]);
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
