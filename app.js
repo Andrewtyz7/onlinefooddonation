@@ -193,6 +193,48 @@ app.post('/api/volunteer', async (req, res) => {
   }
 });
 
+// Food donation form submission endpoint
+app.post('/api/food-donation', async (req, res) => {
+  try {
+    const { formData, recipientEmail } = req.body;
+    
+    // Email to company
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: recipientEmail,
+      subject: 'New Food Donation Submission',
+      html: `
+        <h2>New Food Donation</h2>
+        <p><strong>Name:</strong> ${formData.fullName}</p>
+        <p><strong>Email:</strong> ${formData.email}</p>
+        <p><strong>Address:</strong> ${formData.address}</p>
+        <p><strong>Food Type:</strong> ${formData.foodType}</p>
+        <p><strong>Quantity:</strong> ${formData.quantity}</p>
+        <p><strong>Donation Method:</strong> ${formData.donationMethod}</p>
+        ${formData.pickupLocation ? `<p><strong>Pickup Location:</strong> ${formData.pickupLocation}</p>` : ''}
+        <p>Please contact the donor within 2 working days to arrange details.</p>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    
+    // Optional: Send confirmation email to donor
+    const donorMailOptions = {
+      from: process.env.EMAIL_USER,
+      to: formData.email,
+      subject: 'Thank You for Your Food Donation',
+      text: `Dear ${formData.fullName},\n\nThank you for your generous food donation to TogetherWeFeed. We have received your submission and will contact you within 2 working days to arrange the details.\n\nYour contribution will help feed those in need in our community.\n\nBest regards,\nThe TogetherWeFeed Team`
+    };
+
+    await transporter.sendMail(donorMailOptions);
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Email Error:', err);
+    res.status(500).json({ error: 'Failed to process donation' });
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error(err); // Always log errors
   res.status(500).json({ error: 'Something went wrong' });
