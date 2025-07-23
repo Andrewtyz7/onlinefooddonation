@@ -21,7 +21,7 @@ app.use(helmet());
 app.use(cors({
   origin: [
     'https://togtherwefeed.netlify.app',
-    'http://localhost:5173'
+    //'http://localhost:5173'
   ],
 }));
 
