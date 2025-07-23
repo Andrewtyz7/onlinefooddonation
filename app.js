@@ -1,6 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const app = express();
+
+app.use(express.json());
+
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -21,7 +24,7 @@ app.use(helmet());
 app.use(cors({
   origin: [
     'https://togtherwefeed.netlify.app',
-    //'http://localhost:5173'
+    'http://localhost:5173'
   ],
 }));
 
