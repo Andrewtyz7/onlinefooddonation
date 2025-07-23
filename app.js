@@ -84,7 +84,6 @@ app.post('/api/save-donation', async (req, res) => {
         donor_name,
         donor_email,
         payment_intent_id,
-        status: 'completed'
       }]);
 
     if (error) throw error;
