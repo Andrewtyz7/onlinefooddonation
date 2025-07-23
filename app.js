@@ -83,7 +83,7 @@ app.post('/api/save-donation', async (req, res) => {
         amount,
         donor_name,
         donor_email,
-        payment_intent_id,
+        payment_intent_id
       }]);
 
     if (error) throw error;
