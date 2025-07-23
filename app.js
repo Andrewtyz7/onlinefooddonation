@@ -235,6 +235,50 @@ app.post('/api/food-donation', async (req, res) => {
   }
 });
 
+// Event request form submission endpoint
+app.post('/api/event-request', async (req, res) => {
+  try {
+    const { formData, recipientEmail } = req.body;
+    
+    // Email to company
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: recipientEmail,
+      subject: 'New Event Organization Request',
+      html: `
+        <h2>New Event Request</h2>
+        <p><strong>Name:</strong> ${formData.fullName}</p>
+        <p><strong>Company:</strong> ${formData.companyName}</p>
+        <p><strong>Email:</strong> ${formData.email}</p>
+        <p><strong>Address:</strong> ${formData.address}</p>
+        <p><strong>Company Address:</strong> ${formData.companyAddress}</p>
+        <p><strong>Event Type:</strong> ${formData.eventType}</p>
+        <p><strong>Event Date:</strong> ${formData.eventDate}</p>
+        <p><strong>Event Description:</strong></p>
+        <p>${formData.eventDescription}</p>
+        <p>Please contact the organizer within 3 business days to discuss details.</p>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    
+    // Optional: Send confirmation email to requester
+    const requesterMailOptions = {
+      from: process.env.EMAIL_USER,
+      to: formData.email,
+      subject: 'Thank You for Your Event Request',
+      text: `Dear ${formData.fullName},\n\nThank you for your event organization request to TogetherWeFeed. We have received your submission and will review it shortly. Our team will contact you within 3 business days to discuss next steps.\n\nFor any urgent inquiries, please contact events@togetherwefeed.org.\n\nBest regards,\nThe TogetherWeFeed Team`
+    };
+
+    await transporter.sendMail(requesterMailOptions);
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Email Error:', err);
+    res.status(500).json({ error: 'Failed to process event request' });
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error(err); // Always log errors
   res.status(500).json({ error: 'Something went wrong' });
