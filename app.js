@@ -77,6 +77,7 @@ app.post('/api/save-donation', async (req, res) => {
   try {
     const { amount, donor_name, donor_email, payment_intent_id } = req.body;
     
+    // 1. Save donation to database
     const { data, error } = await supabase
       .from('donations')
       .insert([{
@@ -87,9 +88,67 @@ app.post('/api/save-donation', async (req, res) => {
       }]);
 
     if (error) throw error;
-    res.json(data);
+
+    // 2. Retrieve payment intent to get customer details
+    const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
+
+    // 3. Create or retrieve customer in Stripe
+    let customer;
+    if (paymentIntent.customer) {
+      customer = await stripe.customers.retrieve(paymentIntent.customer);
+    } else {
+      customer = await stripe.customers.create({
+        email: donor_email,
+        name: donor_name,
+        metadata: {
+          donation_id: data[0].id
+        }
+      });
+      
+      // Update payment intent with customer
+      await stripe.paymentIntents.update(payment_intent_id, {
+        customer: customer.id
+      });
+    }
+
+    // 4. Create and send invoice
+    const invoice = await stripe.invoices.create({
+      customer: customer.id,
+      auto_advance: true, 
+      collection_method: 'send_invoice',
+      days_until_due: 0,
+      description: `Donation to Together We Feed - Thank you for your generosity!`,
+      metadata: {
+        donation_id: data[0].id,
+        payment_intent_id
+      }
+    });
+
+    // Add invoice item
+    await stripe.invoiceItems.create({
+      customer: customer.id,
+      invoice: invoice.id,
+      amount: Math.round(amount * 100),
+      currency: 'myr',
+      description: 'Food donation to help those in need'
+    });
+
+    // Finalize and send invoice
+    const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
+    await stripe.invoices.sendInvoice(finalizedInvoice.id);
+
+    res.json({
+      ...data[0],
+      invoice_id: finalizedInvoice.id,
+      invoice_url: finalizedInvoice.hosted_invoice_url
+    });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Donation processing error:', err);
+    res.status(500).json({ 
+      error: err.message,
+      type: err.type 
+    });
   }
 });
 
