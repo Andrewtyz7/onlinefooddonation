@@ -8,6 +8,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const nodemailer = require('nodemailer');
 
 // Test route - should work
 app.get('/api/test', (req, res) => {
@@ -141,6 +142,54 @@ app.post('/api/send-invoice', async (req, res) => {
       error: err.type || 'Invoice creation failed',
       message: err.message 
     });
+  }
+});
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail', // or your email service
+  auth: {
+    user: 'pwrandrew@gmail.com', 
+    pass: 'ziebaleaxrimnmyc' 
+  }
+});
+
+// Volunteer form submission endpoint
+app.post('/api/volunteer', async (req, res) => {
+  try {
+    const { formData, recipientEmail } = req.body;
+    
+    // Email to company
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: recipientEmail,
+      subject: 'New Volunteer Application',
+      html: `
+        <h2>New Volunteer Application</h2>
+        <p><strong>Name:</strong> ${formData.fullName}</p>
+        <p><strong>Email:</strong> ${formData.email}</p>
+        <p><strong>About:</strong> ${formData.about}</p>
+        <p><strong>Motivation:</strong> ${formData.motivation}</p>
+        ${formData.socialMedia ? `<p><strong>Social Media:</strong> ${formData.socialMedia}</p>` : ''}
+        <p>Please review this application and respond within 5 working days.</p>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    
+    // Optional: Send confirmation email to volunteer
+    const volunteerMailOptions = {
+      from: process.env.EMAIL_USER,
+      to: formData.email,
+      subject: 'Thank You for Your Volunteer Application',
+      text: `Dear ${formData.fullName},\n\nThank you for applying to volunteer with TogetherWeFeed. We have received your application and will review it shortly. Our team will contact you within 5 working days.\n\nBest regards,\nThe TogetherWeFeed Team`
+    };
+
+    await transporter.sendMail(volunteerMailOptions);
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Email Error:', err);
+    res.status(500).json({ error: 'Failed to process application' });
   }
 });
 

@@ -7,7 +7,6 @@
     "start": "node app.js",
     "dev": "nodemon app.js",
     "clean-install": "npm cache clean --force && npm prune && npm install"
-
   },
   "keywords": [],
   "author": "",
@@ -21,6 +20,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.0.1",
     "helmet": "^8.1.0",
+    "nodemailer": "^7.0.5",
     "path-to-regexp": "^8.2.0",
     "stripe": "^18.3.0"
   }
