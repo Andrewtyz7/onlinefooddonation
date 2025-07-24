@@ -36,17 +36,25 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// NEW: Create Checkout Session endpoint
+// Payment endpoint
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
-    const { amount, donor_name, donor_email } = req.body;
+    const { amount, donor_name, donor_email, success_url, cancel_url } = req.body;
     
     // Validate amount
     if (!amount || isNaN(amount)) {
       return res.status(400).json({ error: 'Valid amount is required' });
     }
 
+    // Create a customer in Stripe
+    const customer = await stripe.customers.create({
+      name: donor_name,
+      email: donor_email
+    });
+
+    // Create Checkout Session
     const session = await stripe.checkout.sessions.create({
+      customer: customer.id,
       payment_method_types: ['card'],
       line_items: [{
         price_data: {
@@ -54,21 +62,21 @@ app.post('/api/create-checkout-session', async (req, res) => {
           product_data: {
             name: 'Food Donation',
           },
-          unit_amount: amount, // Convert to cents
+          unit_amount: amount,
         },
         quantity: 1,
       }],
       mode: 'payment',
-      customer_email: donor_email,
+      success_url: `${success_url}&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: cancel_url,
       metadata: {
         donor_name: donor_name,
-        donation: 'true'
-      },
-      success_url: `${process.env.FRONTEND_URL}/donation-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/donation-canceled`,
+        donor_email: donor_email
+      }
     });
 
     res.json({ id: session.id });
+
   } catch (err) {
     console.error('Stripe Checkout Error:', err);
     res.status(500).json({ 
@@ -78,8 +86,8 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
-// Webhook endpoint for Stripe events
-app.post('/api/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+// Webhook endpoint for Stripe events (optional but recommended)
+app.post('/api/stripe-webhook', express.raw({type: 'application/json'}), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -96,59 +104,27 @@ app.post('/api/webhook', express.raw({type: 'application/json'}), async (req, re
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     
+    // Save donation to database
     try {
-      // Save donation to database
       const { data, error } = await supabase
         .from('donations')
         .insert([{
           amount: session.amount_total / 100, // Convert back to RM
           donor_name: session.metadata.donor_name,
-          donor_email: session.customer_email,
+          donor_email: session.customer_details.email,
           payment_intent_id: session.payment_intent
         }]);
 
       if (error) throw error;
 
-      // Send invoice email
-      await sendDonationReceipt(
-        session.customer_email,
-        session.metadata.donor_name,
-        session.amount_total / 100,
-        session.id
-      );
-
+      console.log('Donation saved:', data);
     } catch (err) {
-      console.error('Post-checkout processing error:', err);
+      console.error('Database Error:', err);
     }
   }
 
   res.json({ received: true });
 });
-
-// Helper function to send donation receipt
-async function sendDonationReceipt(email, name, amount, sessionId) {
-  try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Thank You for Your Donation',
-      html: `
-        <h2>Thank You for Your Generous Donation</h2>
-        <p>Dear ${name},</p>
-        <p>We've successfully received your donation of RM${amount.toFixed(2)}.</p>
-        <p>Your support helps us fight hunger and reduce food waste in our community.</p>
-        <p>Transaction ID: ${sessionId}</p>
-        <p>This email serves as your receipt. If you need an official tax receipt, please reply to this email.</p>
-        <p>With gratitude,</p>
-        <p>The TogetherWeFeed Team</p>
-      `
-    };
-
-    await transporter.sendMail(mailOptions);
-  } catch (err) {
-    console.error('Error sending donation receipt:', err);
-  }
-}
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -156,6 +132,59 @@ const supabase = createClient(
   "https://cokwmdjqgdywymlayyid.supabase.co",
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNva3dtZGpxZ2R5d3ltbGF5eWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxODk2ODYsImV4cCI6MjA2ODc2NTY4Nn0.jhhTETXwvnv1ThjobwydV2_45HdEUHCMKBmMcGZx_pw'
 );
+
+// Save donation record
+app.post('/api/save-donation', async (req, res) => {
+  try {
+    const { amount, donor_name, donor_email, payment_intent_id } = req.body;
+    
+    const { data, error } = await supabase
+      .from('donations')
+      .insert([{
+        amount,
+        donor_name,
+        donor_email,
+        payment_intent_id
+      }]);
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Send invoice endpoint
+// Send receipt endpoint (not invoice)
+app.post('/api/send-receipt', async (req, res) => {
+  try {
+    const { customer_email, amount, donor_name } = req.body;
+    
+    // Create a payment receipt (not an invoice)
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency: 'myr',
+      receipt_email: customer_email,
+      description: `Food donation from ${donor_name}`,
+      metadata: {
+        donation: 'true',
+        donor_name: donor_name
+      }
+    });
+
+    res.json({ 
+      success: true,
+      receiptUrl: `https://dashboard.stripe.com/test/payments/${paymentIntent.id}`
+    });
+    
+  } catch (err) {
+    console.error('Receipt Error:', err);
+    res.status(500).json({ 
+      error: err.type || 'Receipt creation failed',
+      message: err.message 
+    });
+  }
+});
 
 const transporter = nodemailer.createTransport({
   service: 'gmail', // or your email service
