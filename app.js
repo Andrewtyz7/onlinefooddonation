@@ -81,7 +81,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
 // Webhook endpoint for Stripe events
 app.post('/api/webhook', express.raw({type: 'application/json'}), async (req, res) => {
   const sig = req.headers['stripe-signature'];
-  const endpointSecret = 'whsec_PsU4w0pMaGbB3bZpzXbnsqPH4eo4Lxpu';
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   let event;
 
