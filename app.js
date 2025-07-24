@@ -54,7 +54,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
           product_data: {
             name: 'Food Donation',
           },
-          unit_amount: Math.round(amount * 100), // Convert to cents
+          unit_amount: amount, // Convert to cents
         },
         quantity: 1,
       }],
