@@ -36,35 +36,119 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Payment endpoint
-app.post('/api/create-payment-intent', async (req, res) => {
+// NEW: Create Checkout Session endpoint
+app.post('/api/create-checkout-session', async (req, res) => {
   try {
-    const { amount, currency = 'myr' } = req.body;
+    const { amount, donor_name, donor_email } = req.body;
     
     // Validate amount
     if (!amount || isNaN(amount)) {
       return res.status(400).json({ error: 'Valid amount is required' });
     }
 
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Convert to cents
-      currency: currency.toLowerCase(),
-      metadata: { integration_check: 'accept_a_payment' }
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'myr',
+          product_data: {
+            name: 'Food Donation',
+          },
+          unit_amount: Math.round(amount * 100), // Convert to cents
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      customer_email: donor_email,
+      metadata: {
+        donor_name: donor_name,
+        donation: 'true'
+      },
+      success_url: `https://togtherwefeed.netlify.app/donation-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `https://togtherwefeed.netlify.app/donation-canceled`,
     });
 
-    res.json({
-      clientSecret: paymentIntent.client_secret,
-      amount: paymentIntent.amount,
-      currency: paymentIntent.currency
-    });
+    res.json({ id: session.id });
   } catch (err) {
-    console.error('Stripe Error:', err);
+    console.error('Stripe Checkout Error:', err);
     res.status(500).json({ 
-      error: err.type || 'Payment processing failed',
+      error: err.type || 'Checkout session creation failed',
       message: err.message 
     });
   }
 });
+
+// Webhook endpoint for Stripe events
+app.post('/api/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const endpointSecret = 'whsec_PsU4w0pMaGbB3bZpzXbnsqPH4eo4Lxpu';
+
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    console.error('Webhook Error:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the checkout.session.completed event
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    
+    try {
+      // Save donation to database
+      const { data, error } = await supabase
+        .from('donations')
+        .insert([{
+          amount: session.amount_total / 100, // Convert back to RM
+          donor_name: session.metadata.donor_name,
+          donor_email: session.customer_email,
+          payment_intent_id: session.payment_intent
+        }]);
+
+      if (error) throw error;
+
+      // Send invoice email
+      await sendDonationReceipt(
+        session.customer_email,
+        session.metadata.donor_name,
+        session.amount_total / 100,
+        session.id
+      );
+
+    } catch (err) {
+      console.error('Post-checkout processing error:', err);
+    }
+  }
+
+  res.json({ received: true });
+});
+
+// Helper function to send donation receipt
+async function sendDonationReceipt(email, name, amount, sessionId) {
+  try {
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Thank You for Your Donation',
+      html: `
+        <h2>Thank You for Your Generous Donation</h2>
+        <p>Dear ${name},</p>
+        <p>We've successfully received your donation of RM${amount.toFixed(2)}.</p>
+        <p>Your support helps us fight hunger and reduce food waste in our community.</p>
+        <p>Transaction ID: ${sessionId}</p>
+        <p>This email serves as your receipt. If you need an official tax receipt, please reply to this email.</p>
+        <p>With gratitude,</p>
+        <p>The TogetherWeFeed Team</p>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+  } catch (err) {
+    console.error('Error sending donation receipt:', err);
+  }
+}
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -72,78 +156,6 @@ const supabase = createClient(
   "https://cokwmdjqgdywymlayyid.supabase.co",
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNva3dtZGpxZ2R5d3ltbGF5eWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxODk2ODYsImV4cCI6MjA2ODc2NTY4Nn0.jhhTETXwvnv1ThjobwydV2_45HdEUHCMKBmMcGZx_pw'
 );
-
-// Save donation record
-app.post('/api/save-donation', async (req, res) => {
-  try {
-    const { amount, donor_name, donor_email, payment_intent_id } = req.body;
-    
-    const { data, error } = await supabase
-      .from('donations')
-      .insert([{
-        amount,
-        donor_name,
-        donor_email,
-        payment_intent_id
-      }]);
-
-    if (error) throw error;
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Send invoice endpoint
-app.post('/api/send-invoice', async (req, res) => {
-  try {
-    const { customer_email, amount, donor_name } = req.body;
-    
-    // Create a Stripe customer (or use existing if you have their ID)
-    const customer = await stripe.customers.create({
-      email: customer_email,
-      name: donor_name
-    });
-
-    // Create and send invoice
-    const invoice = await stripe.invoices.create({
-      customer: customer.id,
-      collection_method: 'send_invoice',
-      days_until_due: 30,
-      auto_advance: true,
-      metadata: {
-        donation: 'true',
-        donor_name: donor_name
-      }
-    });
-
-    // Add invoice item
-    await stripe.invoiceItems.create({
-      customer: customer.id,
-      invoice: invoice.id,
-      amount: Math.round(amount * 100), // in cents
-      currency: 'myr', // Malaysian Ringgit
-      description: 'Food Donation'
-    });
-
-    // Finalize and send invoice
-    const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
-    const sentInvoice = await stripe.invoices.sendInvoice(invoice.id);
-
-    res.json({ 
-      success: true,
-      invoiceId: sentInvoice.id,
-      invoiceUrl: sentInvoice.hosted_invoice_url
-    });
-    
-  } catch (err) {
-    console.error('Invoice Error:', err);
-    res.status(500).json({ 
-      error: err.type || 'Invoice creation failed',
-      message: err.message 
-    });
-  }
-});
 
 const transporter = nodemailer.createTransport({
   service: 'gmail', // or your email service
