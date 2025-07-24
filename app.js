@@ -64,8 +64,8 @@ app.post('/api/create-checkout-session', async (req, res) => {
         donor_name: donor_name,
         donation: 'true'
       },
-      success_url: `https://togtherwefeed.netlify.app/donation-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `https://togtherwefeed.netlify.app/donation-canceled`,
+      success_url: `${process.env.FRONTEND_URL}/donation-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL}/donation-canceled`,
     });
 
     res.json({ id: session.id });
